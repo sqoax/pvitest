@@ -1,16 +1,28 @@
 // js/data-engine.js — PVI data processing engine
 
-export function processSheet(sheet) {
-  const range = XLSX.utils.decode_range(sheet['!ref']);
-  const totalCols = range.e.c + 1;
-  const totalRows = range.e.r + 1;
+// Accept either a SheetJS sheet object or a plain 2D array (array of arrays) from PapaParse
+export function processSheet(input) {
+  let rows;
+
+  if (Array.isArray(input)) {
+    // PapaParse 2D array — use directly
+    rows = input;
+  } else {
+    // SheetJS sheet object — convert to 2D array
+    rows = XLSX.utils.sheet_to_json(input, { header: 1, defval: '' });
+  }
+
+  if (!rows || rows.length === 0) return { players: [], eventOrder: [] };
+
+  const headerRow = rows[0];
+  const totalCols = headerRow.length;
 
   // Extract event names from row 0, every 3 columns
   const eventOrder = [];
-  for (let c = 0; c <= range.e.c; c += 3) {
-    const cell = sheet[XLSX.utils.encode_cell({ r: 0, c })];
-    if (cell && cell.v != null && String(cell.v).trim()) {
-      eventOrder.push(String(cell.v).trim());
+  for (let c = 0; c < totalCols; c += 3) {
+    const val = headerRow[c];
+    if (val != null && String(val).trim()) {
+      eventOrder.push(String(val).trim());
     }
   }
 
@@ -24,13 +36,14 @@ export function processSheet(sheet) {
     const nameCol = ei * 3;
     const pviCol = nameCol + 1;
 
-    for (let r = 1; r <= range.e.r; r++) {
-      const nameCell = sheet[XLSX.utils.encode_cell({ r, c: nameCol })];
-      const pviCell = sheet[XLSX.utils.encode_cell({ r, c: pviCol })];
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      const nameVal = row[nameCol];
+      const pviVal = row[pviCol];
 
-      if (!nameCell || nameCell.v == null || String(nameCell.v).trim() === '') continue;
-      const name = String(nameCell.v).trim();
-      const pvi = pviCell && pviCell.v != null ? parseFloat(pviCell.v) : NaN;
+      if (nameVal == null || String(nameVal).trim() === '') continue;
+      const name = String(nameVal).trim();
+      const pvi = parseFloat(pviVal);
       if (isNaN(pvi)) continue;
 
       if (!playerMap.has(name)) {

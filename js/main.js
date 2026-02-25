@@ -9,8 +9,13 @@ import {
 } from './ui.js';
 import { renderScatterPlot, destroyAll } from './charts.js';
 
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQXW5b2lq7tQ-Lpz3ADhPE0VJhXmIfVj1P_TT7LzWYNhjHt6g2dr0F77RxO844fxc_ZT9DA8clFHnRE/pub?output=csv';
+
 let allPlayers = [];
 let eventOrder = [];
+let lastFetchTime = null;
+let refreshCooldownUntil = 0;
+let lastUpdatedInterval = null;
 
 // --- Initialization ---
 restoreFromURL();
@@ -19,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setStatus('connecting', 'CONNECTING');
   initUIBindings();
   restoreFilterInputs();
-  autoFetchFile();
+  fetchCSV();
 });
 
 function restoreFilterInputs() {
@@ -27,32 +32,44 @@ function restoreFilterInputs() {
   document.getElementById('min-events-input').value = state.minEvents || '';
 }
 
-// --- Auto-fetch xlsx ---
-async function autoFetchFile() {
+// --- Fetch live CSV from Google Sheets ---
+async function fetchCSV() {
   try {
-    setLoadingStatus('Fetching data file...');
+    setLoadingStatus('Fetching live data...');
     showSkeleton(true);
-    const resp = await fetch('pvi_tourneys.xlsx');
+    setStatus('connecting', 'CONNECTING');
+    setRefreshSpinning(true);
+
+    const url = CSV_URL + '&t=' + Date.now();
+    const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const buf = await resp.arrayBuffer();
-    loadWorkbook(buf);
+    const text = await resp.text();
+
+    setLoadingStatus('Parsing data...');
+
+    const parsed = Papa.parse(text, { skipEmptyLines: false });
+    const rows = parsed.data;
+
+    loadFromRows(rows);
+
+    lastFetchTime = Date.now();
+    updateLastUpdatedDisplay();
+    startLastUpdatedTimer();
+
   } catch (err) {
-    console.warn('Auto-fetch failed:', err.message);
-    setStatus('error', 'NO FILE');
+    console.warn('CSV fetch failed:', err.message);
+    setStatus('error', 'FETCH ERROR');
     showSkeleton(false);
     setLoadingStatus(null);
     document.getElementById('drop-zone').classList.remove('hidden');
+  } finally {
+    setRefreshSpinning(false);
   }
 }
 
-// --- Load workbook from ArrayBuffer ---
-function loadWorkbook(buf) {
-  setLoadingStatus('Parsing workbook...');
-  const wb = XLSX.read(buf, { type: 'array' });
-  const sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('tourney')) || wb.SheetNames[0];
-  const sheet = wb.Sheets[sheetName];
-
-  const result = processSheet(sheet);
+// --- Load data from a 2D array (CSV or converted XLSX) ---
+function loadFromRows(rows) {
+  const result = processSheet(rows);
   allPlayers = result.players;
   eventOrder = result.eventOrder;
 
@@ -68,6 +85,21 @@ function loadWorkbook(buf) {
   document.getElementById('drop-zone').classList.add('hidden');
 
   refresh();
+}
+
+// --- Load workbook from ArrayBuffer (xlsx drag & drop fallback) ---
+function loadWorkbook(buf) {
+  setLoadingStatus('Parsing workbook...');
+  const wb = XLSX.read(buf, { type: 'array' });
+  const sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('tourney')) || wb.SheetNames[0];
+  const sheet = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+  loadFromRows(rows);
+
+  lastFetchTime = Date.now();
+  updateLastUpdatedDisplay();
+  startLastUpdatedTimer();
 }
 
 // --- Refresh table + charts ---
@@ -103,6 +135,39 @@ function onCompareToggle(player, checked) {
 function updateComparisonFromSelection() {
   const selected = allPlayers.filter(p => state.selectedPlayers.has(p.name));
   renderComparisonPanel(selected);
+}
+
+// --- Refresh button helpers ---
+function setRefreshSpinning(spinning) {
+  const icon = document.getElementById('refresh-icon');
+  if (spinning) {
+    icon.style.animation = 'spin 0.8s linear infinite';
+  } else {
+    icon.style.animation = '';
+  }
+}
+
+function updateLastUpdatedDisplay() {
+  const el = document.getElementById('last-updated');
+  if (!lastFetchTime) {
+    el.textContent = '';
+    return;
+  }
+  const diffMs = Date.now() - lastFetchTime;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 10) {
+    el.textContent = 'Updated just now';
+  } else if (diffSec < 60) {
+    el.textContent = `Updated ${diffSec}s ago`;
+  } else {
+    const mins = Math.floor(diffSec / 60);
+    el.textContent = `Updated ${mins}m ago`;
+  }
+}
+
+function startLastUpdatedTimer() {
+  if (lastUpdatedInterval) clearInterval(lastUpdatedInterval);
+  lastUpdatedInterval = setInterval(updateLastUpdatedDisplay, 10000);
 }
 
 // --- UI Bindings ---
@@ -189,7 +254,21 @@ function initUIBindings() {
     darkToggle.textContent = isLight ? '🌙' : '☀️';
   });
 
-  // Drag & drop
+  // Refresh button with 30s cooldown
+  const refreshBtn = document.getElementById('refresh-btn');
+  refreshBtn.addEventListener('click', () => {
+    const now = Date.now();
+    if (now < refreshCooldownUntil) {
+      const remaining = Math.ceil((refreshCooldownUntil - now) / 1000);
+      setLoadingStatus(`Cooldown: ${remaining}s remaining`);
+      setTimeout(() => setLoadingStatus(null), 2000);
+      return;
+    }
+    refreshCooldownUntil = now + 30000;
+    fetchCSV();
+  });
+
+  // Drag & drop (xlsx fallback)
   const dropZone = document.getElementById('drop-zone');
   const fileInput = document.getElementById('file-input');
 
