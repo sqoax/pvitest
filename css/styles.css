@@ -1,0 +1,320 @@
+/* css/styles.css — PVI Analyzer v2 custom styles */
+
+:root {
+  --bg-main: #050507;
+  --bg-panel: #0E0E12;
+  --border: rgba(255,255,255,0.08);
+  --accent-green: #39FF88;
+  --accent-blue: #39DFFF;
+  --accent-purple: #9F39FF;
+  --text-primary: #ffffff;
+  --text-secondary: #94a3b8;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.1) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+}
+
+.font-mono, .font-mono * {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.text-secondary {
+  color: var(--text-secondary);
+}
+
+.bg-panel {
+  background-color: var(--bg-panel);
+}
+
+.border-panel {
+  border-color: var(--border);
+}
+
+/* Skeleton loader */
+.skeleton-row {
+  height: 40px;
+  border-radius: 4px;
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.03) 25%,
+    rgba(255,255,255,0.06) 50%,
+    rgba(255,255,255,0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Status pill */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+}
+
+/* Cards */
+.summary-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: border-color 0.2s;
+}
+
+.summary-card:hover {
+  border-color: rgba(255,255,255,0.15);
+}
+
+/* Table */
+#main-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#main-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-panel);
+}
+
+#main-table th {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Drop zone */
+.drop-zone {
+  border: 2px dashed rgba(255,255,255,0.15);
+  border-radius: 12px;
+  padding: 48px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(255,255,255,0.02);
+}
+
+.drop-zone:hover {
+  border-color: var(--accent-green);
+  background: rgba(57,255,136,0.03);
+}
+
+.drop-zone.border-green-400 {
+  border-color: var(--accent-green) !important;
+  background: rgba(57,255,136,0.05) !important;
+}
+
+/* Player modal */
+#player-modal {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Comparison panel */
+#comparison-panel {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Toggle switches */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(255,255,255,0.1);
+  border-radius: 20px;
+  transition: 0.3s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  border-radius: 50%;
+  transition: 0.3s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: var(--accent-green);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+}
+
+/* Filter bar */
+.filter-bar input[type="text"],
+.filter-bar input[type="number"],
+.filter-bar select {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.filter-bar input:focus,
+.filter-bar select:focus {
+  border-color: var(--accent-green);
+}
+
+.filter-bar select option {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+/* Buttons */
+.btn-primary {
+  background: var(--accent-green);
+  color: #050507;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  border: none;
+}
+
+.btn-primary:hover {
+  opacity: 0.85;
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-outline:hover {
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+/* Modal stat cards */
+.modal-stat-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+/* Light mode overrides */
+.light-mode {
+  --bg-main: #f8fafc;
+  --bg-panel: #ffffff;
+  --border: rgba(0,0,0,0.1);
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --accent-green: #16a34a;
+  --accent-blue: #0284c7;
+  --accent-purple: #7c3aed;
+}
+
+.light-mode body {
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+}
+
+.light-mode .bg-panel {
+  background-color: var(--bg-panel);
+}
+
+.light-mode #main-table thead {
+  background: var(--bg-panel);
+}
+
+.light-mode .summary-card {
+  background: var(--bg-panel);
+  border-color: var(--border);
+}
+
+.light-mode .skeleton-row {
+  background: linear-gradient(90deg,
+    rgba(0,0,0,0.04) 25%,
+    rgba(0,0,0,0.07) 50%,
+    rgba(0,0,0,0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.light-mode .drop-zone {
+  border-color: rgba(0,0,0,0.15);
+  background: rgba(0,0,0,0.02);
+}
+
+.light-mode .status-pill {
+  background: rgba(0,0,0,0.04);
+  border-color: var(--border);
+}
+
+.light-mode .filter-bar input[type="text"],
+.light-mode .filter-bar input[type="number"],
+.light-mode .filter-bar select {
+  background: rgba(0,0,0,0.03);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.light-mode .modal-stat-card {
+  background: rgba(0,0,0,0.03);
+  border-color: var(--border);
+}
+
+.light-mode .toggle-slider {
+  background-color: rgba(0,0,0,0.15);
+}
