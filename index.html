@@ -51,6 +51,11 @@
           <div id="status-dot" class="w-2 h-2 rounded-full bg-yellow-400 animate-pulse"></div>
           <span id="status-label" class="text-xs font-semibold text-yellow-400">CONNECTING</span>
         </div>
+        <!-- Tab Navigation -->
+        <nav class="flex items-center gap-1 ml-2">
+          <button id="tab-analyzer" class="tab-btn tab-active">Analyzer</button>
+          <button id="tab-preview" class="tab-btn">Preview</button>
+        </nav>
       </div>
       <div class="flex items-center gap-3">
         <span id="dataset-meta" class="text-xs text-secondary hidden sm:inline"></span>
@@ -63,10 +68,10 @@
     </div>
   </header>
 
-  <main class="max-w-[1600px] mx-auto px-4 sm:px-6 py-6 space-y-6">
+  <main class="max-w-[1600px] mx-auto px-4 sm:px-6 py-6">
 
     <!-- ==================== DROP ZONE ==================== -->
-    <div id="drop-zone" class="drop-zone hidden">
+    <div id="drop-zone" class="drop-zone hidden mb-6">
       <div class="space-y-3">
         <div class="text-4xl opacity-40">📊</div>
         <p class="text-lg font-semibold text-white">Drop an <code class="text-sm px-2 py-1 rounded" style="background:rgba(255,255,255,0.06);">.xlsx</code> file here to load manually</p>
@@ -78,113 +83,191 @@
     <!-- ==================== LOADING STATUS ==================== -->
     <div id="loading-status" class="hidden text-sm text-secondary font-mono text-center py-2"></div>
 
-    <!-- ==================== SUMMARY CARDS ==================== -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="summary-card">
-        <p class="text-xs text-secondary uppercase tracking-wider mb-1">Players Tracked</p>
-        <p id="card-players" class="text-2xl font-bold font-mono" style="color:#39FF88">—</p>
-      </div>
-      <div class="summary-card">
-        <p class="text-xs text-secondary uppercase tracking-wider mb-1">Tournaments Logged</p>
-        <p id="card-events" class="text-2xl font-bold font-mono" style="color:#39DFFF">—</p>
-      </div>
-      <div class="summary-card">
-        <p class="text-xs text-secondary uppercase tracking-wider mb-1">Top Composite Score</p>
-        <p id="card-top-composite-name" class="text-sm font-semibold text-white truncate">—</p>
-        <p id="card-top-composite-val" class="text-xl font-bold font-mono" style="color:#9F39FF">—</p>
-      </div>
-      <div class="summary-card">
-        <p class="text-xs text-secondary uppercase tracking-wider mb-1">Most Consistent</p>
-        <p id="card-consistent-name" class="text-sm font-semibold text-white truncate">—</p>
-        <p id="card-consistent-val" class="text-xl font-bold font-mono" style="color:#39DFFF">—</p>
-      </div>
-    </div>
+    <!-- ========================= ANALYZER VIEW ========================= -->
+    <div id="view-analyzer" class="space-y-6">
 
-    <!-- ==================== FILTER BAR ==================== -->
-    <div class="filter-bar bg-panel border border-panel rounded-xl p-4">
-      <div class="flex flex-wrap items-center gap-3">
-        <input type="text" id="search-input" placeholder="Search player..." class="w-48">
-
-        <div class="flex items-center gap-2">
-          <label class="text-xs text-secondary whitespace-nowrap">Min Events</label>
-          <input type="number" id="min-events-input" min="0" class="w-20" placeholder="0">
+      <!-- Summary Cards -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="summary-card">
+          <p class="text-xs text-secondary uppercase tracking-wider mb-1">Players Tracked</p>
+          <p id="card-players" class="text-2xl font-bold font-mono" style="color:#39FF88">—</p>
         </div>
-
-        <div class="flex items-center gap-2">
-          <label class="toggle-switch">
-            <input type="checkbox" id="gte1-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-          <span class="text-xs text-secondary whitespace-nowrap">Only ≥1.0 avg</span>
+        <div class="summary-card">
+          <p class="text-xs text-secondary uppercase tracking-wider mb-1">Tournaments Logged</p>
+          <p id="card-events" class="text-2xl font-bold font-mono" style="color:#39DFFF">—</p>
         </div>
-
-        <div class="flex items-center gap-2">
-          <label class="toggle-switch">
-            <input type="checkbox" id="field-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-          <span class="text-xs text-secondary whitespace-nowrap">Field Mode</span>
+        <div class="summary-card">
+          <p class="text-xs text-secondary uppercase tracking-wider mb-1">Top Composite Score</p>
+          <p id="card-top-composite-name" class="text-sm font-semibold text-white truncate">—</p>
+          <p id="card-top-composite-val" class="text-xl font-bold font-mono" style="color:#9F39FF">—</p>
         </div>
-
-        <select id="sort-select" class="w-40">
-          <option value="compositeScore">Composite Score</option>
-          <option value="avgPvi">Avg PVI</option>
-          <option value="medianPvi">Median PVI</option>
-          <option value="hitRate">Hit Rate</option>
-          <option value="volatility">Volatility</option>
-          <option value="consistencyIndex">CI</option>
-          <option value="trendMomentum">Momentum</option>
-          <option value="events">Events</option>
-          <option value="name">Name</option>
-        </select>
-
-        <button id="export-csv-btn" class="btn-outline text-xs">Export CSV</button>
-
-        <button id="field-tools-toggle" class="btn-outline text-xs">Field Tools ▾</button>
+        <div class="summary-card">
+          <p class="text-xs text-secondary uppercase tracking-wider mb-1">Most Consistent</p>
+          <p id="card-consistent-name" class="text-sm font-semibold text-white truncate">—</p>
+          <p id="card-consistent-val" class="text-xl font-bold font-mono" style="color:#39DFFF">—</p>
+        </div>
       </div>
 
-      <!-- Field Tools Panel -->
-      <div id="field-tools-panel" class="hidden mt-4 pt-4 border-t border-panel">
-        <div class="flex flex-col sm:flex-row gap-4">
-          <div class="flex-1">
-            <label class="text-xs text-secondary block mb-1">Paste field list (one player per line)</label>
-            <textarea id="field-textarea" rows="4" class="w-full rounded-lg p-3 text-sm font-mono" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:white;resize:vertical;outline:none;" placeholder="Scottie Scheffler&#10;Rory McIlroy&#10;Jon Rahm"></textarea>
-            <button id="field-apply-btn" class="btn-primary text-xs mt-2">Apply Field</button>
+      <!-- Filter Bar -->
+      <div class="filter-bar bg-panel border border-panel rounded-xl p-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <input type="text" id="search-input" placeholder="Search player..." class="w-48">
+
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-secondary whitespace-nowrap">Min Events</label>
+            <input type="number" id="min-events-input" min="0" class="w-20" placeholder="0">
           </div>
-          <div id="field-stats" class="flex-1"></div>
+
+          <div class="flex items-center gap-2">
+            <label class="toggle-switch"><input type="checkbox" id="gte1-toggle"><span class="toggle-slider"></span></label>
+            <span class="text-xs text-secondary whitespace-nowrap">Only ≥1.0 avg</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <label class="toggle-switch"><input type="checkbox" id="field-toggle"><span class="toggle-slider"></span></label>
+            <span class="text-xs text-secondary whitespace-nowrap">Field Mode</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <label class="toggle-switch"><input type="checkbox" id="heatmap-toggle"><span class="toggle-slider"></span></label>
+            <span class="text-xs text-secondary whitespace-nowrap">Heatmap</span>
+          </div>
+
+          <select id="tag-filter" class="w-32">
+            <option value="all">All Tags</option>
+            <option value="follow">Follow</option>
+            <option value="fade">Fade</option>
+            <option value="watch">Watch</option>
+            <option value="untagged">Untagged</option>
+          </select>
+
+          <select id="sort-select" class="w-40">
+            <option value="compositeScore">Composite Score</option>
+            <option value="avgPvi">Avg PVI</option>
+            <option value="medianPvi">Median PVI</option>
+            <option value="hitRate">Hit Rate</option>
+            <option value="volatility">Volatility</option>
+            <option value="consistencyIndex">CI</option>
+            <option value="trendMomentum">Momentum</option>
+            <option value="events">Events</option>
+            <option value="name">Name</option>
+          </select>
+
+          <button id="export-csv-btn" class="btn-outline text-xs">Export CSV</button>
+          <button id="field-tools-toggle" class="btn-outline text-xs">Field Tools ▾</button>
+        </div>
+
+        <!-- Field Tools Panel -->
+        <div id="field-tools-panel" class="hidden mt-4 pt-4 border-t border-panel">
+          <div class="flex flex-col sm:flex-row gap-4">
+            <div class="flex-1">
+              <label class="text-xs text-secondary block mb-1">Paste field list (one player per line)</label>
+              <textarea id="field-textarea" rows="4" class="w-full rounded-lg p-3 text-sm font-mono" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:white;resize:vertical;outline:none;" placeholder="Scottie Scheffler&#10;Rory McIlroy&#10;Jon Rahm"></textarea>
+              <button id="field-apply-btn" class="btn-primary text-xs mt-2">Apply Field</button>
+            </div>
+            <div id="field-stats" class="flex-1"></div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- ==================== SKELETON LOADER ==================== -->
-    <div id="skeleton-loader" class="space-y-2">
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
-    </div>
-
-    <!-- ==================== MAIN TABLE ==================== -->
-    <div class="bg-panel border border-panel rounded-xl overflow-hidden">
-      <div class="overflow-x-auto">
-        <table id="main-table">
-          <thead id="main-thead"></thead>
-          <tbody id="main-tbody"></tbody>
-        </table>
+      <!-- Skeleton Loader -->
+      <div id="skeleton-loader" class="space-y-2">
+        <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
+        <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
+        <div class="skeleton-row"></div><div class="skeleton-row"></div>
       </div>
-    </div>
 
-    <!-- ==================== SCATTER PLOT ==================== -->
-    <div class="bg-panel border border-panel rounded-xl p-4 sm:p-6">
-      <h2 class="text-lg font-semibold text-white mb-4">Performance Map</h2>
-      <div style="height:420px;position:relative;">
-        <canvas id="scatter-canvas"></canvas>
+      <!-- Main Table -->
+      <div class="bg-panel border border-panel rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table id="main-table">
+            <thead id="main-thead"></thead>
+            <tbody id="main-tbody"></tbody>
+          </table>
+        </div>
+        <!-- Heatmap legend -->
+        <div id="heatmap-legend" class="hidden px-4 py-2 border-t border-panel">
+          <div class="flex items-center gap-3 text-xs text-secondary">
+            <span>Heatmap:</span>
+            <div class="flex items-center gap-1">
+              <span>Low</span>
+              <div class="w-24 h-3 rounded" style="background:linear-gradient(to right, rgba(57,255,136,0.05), rgba(57,255,136,0.7));"></div>
+              <span>High</span>
+            </div>
+            <div class="flex items-center gap-1 ml-2">
+              <span>Volatility:</span>
+              <div class="w-16 h-3 rounded" style="background:linear-gradient(to right, rgba(239,68,68,0.05), rgba(239,68,68,0.7));"></div>
+              <span>(lower better)</span>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <!-- Scatter Plot -->
+      <div class="bg-panel border border-panel rounded-xl p-4 sm:p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">Performance Map</h2>
+        <div style="height:420px;position:relative;">
+          <canvas id="scatter-canvas"></canvas>
+        </div>
+      </div>
+
+      <!-- Tournament Intelligence -->
+      <div class="bg-panel border border-panel rounded-xl p-4 sm:p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">Tournament Intelligence</h2>
+        <div style="height:360px;position:relative;" class="mb-6">
+          <canvas id="tourney-strength-canvas"></canvas>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left">
+            <thead>
+              <tr style="background:rgba(255,255,255,0.03);">
+                <th class="px-3 py-2 text-xs text-secondary uppercase">Rank</th>
+                <th class="px-3 py-2 text-xs text-secondary uppercase">Tournament</th>
+                <th class="px-3 py-2 text-xs text-secondary uppercase">Avg Field PVI</th>
+                <th class="px-3 py-2 text-xs text-secondary uppercase">Median</th>
+                <th class="px-3 py-2 text-xs text-secondary uppercase">Players</th>
+                <th class="px-3 py-2 text-xs text-secondary uppercase">Std Dev</th>
+              </tr>
+            </thead>
+            <tbody id="tourney-intel-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /view-analyzer -->
+
+    <!-- ========================= PREVIEW VIEW ========================= -->
+    <div id="view-preview" class="hidden space-y-6">
+
+      <div class="bg-panel border border-panel rounded-xl p-4 sm:p-6">
+        <div class="mb-4">
+          <label class="text-xs text-secondary uppercase tracking-wider block mb-1">This Week</label>
+          <input type="text" id="preview-tourney-name" placeholder="Tournament name" class="w-full sm:w-80 rounded-lg px-3 py-2 text-sm" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:white;outline:none;">
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <!-- Left: Field textarea -->
+          <div>
+            <label class="text-xs text-secondary uppercase tracking-wider block mb-1">Paste Field List (one player per line)</label>
+            <textarea id="preview-field-textarea" rows="14" class="w-full rounded-lg p-3 text-sm font-mono" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:white;resize:vertical;outline:none;" placeholder="Scottie Scheffler&#10;Rory McIlroy&#10;Jon Rahm&#10;Xander Schauffele"></textarea>
+            <div class="flex gap-2 mt-3">
+              <button id="preview-load-btn" class="btn-primary text-sm">Load Field</button>
+              <button id="preview-export-btn" class="btn-outline text-xs">Export Preview CSV</button>
+            </div>
+          </div>
+
+          <!-- Right: Ranked output -->
+          <div>
+            <h3 id="preview-tourney-header" class="text-lg font-semibold text-white mb-2">Tournament Preview</h3>
+            <div id="preview-summary" class="mb-3"></div>
+            <div id="preview-output" class="overflow-x-auto max-h-[500px] overflow-y-auto rounded-lg border border-panel">
+              <p class="text-secondary text-sm py-8 text-center">Paste a field list and click "Load Field" to see rankings.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /view-preview -->
 
   </main>
 
@@ -198,7 +281,6 @@
           <button id="comparison-clear-btn" class="btn-outline text-xs">Clear Selection</button>
         </div>
       </div>
-
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div class="overflow-x-auto">
           <table class="w-full text-left">
@@ -225,10 +307,14 @@
           <div class="flex items-center gap-3 mt-1">
             <span id="modal-events-count" class="text-sm text-secondary"></span>
             <span id="modal-percentile" class="text-sm font-semibold px-2 py-0.5 rounded" style="background:rgba(57,255,136,0.1);"></span>
+            <span id="modal-tag-area"></span>
           </div>
         </div>
         <button id="modal-close-btn" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/5 text-secondary hover:text-white transition-colors text-lg">✕</button>
       </div>
+
+      <!-- Regression warning banner -->
+      <div id="modal-regression-banner" class="hidden rounded-lg px-4 py-3 text-sm" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);color:#fbbf24;"></div>
 
       <!-- Stat cards grid -->
       <div class="grid grid-cols-3 gap-3">

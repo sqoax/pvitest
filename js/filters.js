@@ -1,4 +1,34 @@
-// js/filters.js — Filtering, sorting, and URL state management
+// js/filters.js — Filtering, sorting, URL state, tags, and export
+
+// --- Player Tags (localStorage) ---
+
+const TAGS_KEY = 'pvi_player_tags';
+
+export function loadTags() {
+  try {
+    return JSON.parse(localStorage.getItem(TAGS_KEY)) || {};
+  } catch { return {}; }
+}
+
+export function saveTags(tags) {
+  localStorage.setItem(TAGS_KEY, JSON.stringify(tags));
+}
+
+export function getTag(playerName) {
+  return loadTags()[playerName] || null;
+}
+
+export function setTag(playerName, tag) {
+  const tags = loadTags();
+  if (tag) {
+    tags[playerName] = tag;
+  } else {
+    delete tags[playerName];
+  }
+  saveTags(tags);
+}
+
+// --- State ---
 
 export const state = {
   search: '',
@@ -8,7 +38,12 @@ export const state = {
   fieldNames: [],
   sortKey: 'compositeScore',
   sortDir: 'desc',
-  selectedPlayers: new Set()
+  selectedPlayers: new Set(),
+  heatmapOn: false,
+  tagFilter: 'all',
+  // Preview tab state
+  previewSortKey: 'compositeScore',
+  previewSortDir: 'desc'
 };
 
 // Restore state from URL params
@@ -30,7 +65,8 @@ export function saveToURL() {
   if (state.minEvents > 0) params.set('minEv', state.minEvents);
   if (state.fieldMode) params.set('field', '1');
   const qs = params.toString();
-  const url = window.location.pathname + (qs ? '?' + qs : '');
+  const hash = window.location.hash;
+  const url = window.location.pathname + (qs ? '?' + qs : '') + hash;
   window.history.replaceState(null, '', url);
 }
 
@@ -38,29 +74,34 @@ export function saveToURL() {
 export function applyFilters(players) {
   let result = [...players];
 
-  // Search filter
   if (state.search) {
     const q = state.search.toLowerCase();
     result = result.filter(p => p.name.toLowerCase().includes(q));
   }
 
-  // Min events filter
   if (state.minEvents > 0) {
     result = result.filter(p => p.events >= state.minEvents);
   }
 
-  // Only >= 1.0 avg filter
   if (state.onlyGte1) {
     result = result.filter(p => p.avgPvi >= 1.0);
   }
 
-  // Field mode filter
   if (state.fieldMode && state.fieldNames.length > 0) {
     const fieldSet = new Set(state.fieldNames.map(n => n.toLowerCase()));
     result = result.filter(p => fieldSet.has(p.name.toLowerCase()));
   }
 
-  // Sort
+  // Tag filter
+  if (state.tagFilter !== 'all') {
+    const tags = loadTags();
+    if (state.tagFilter === 'untagged') {
+      result = result.filter(p => !tags[p.name]);
+    } else {
+      result = result.filter(p => tags[p.name] === state.tagFilter);
+    }
+  }
+
   result.sort((a, b) => {
     let va = a[state.sortKey];
     let vb = b[state.sortKey];
@@ -79,6 +120,25 @@ export function applyFilters(players) {
   });
 
   return result;
+}
+
+// Sort a preview list
+export function applyPreviewSort(list) {
+  return [...list].sort((a, b) => {
+    if (!a._hasData && !b._hasData) return 0;
+    if (!a._hasData) return 1;
+    if (!b._hasData) return -1;
+    let va = a[state.previewSortKey];
+    let vb = b[state.previewSortKey];
+    if (state.previewSortKey === 'name') {
+      va = (va || '').toLowerCase();
+      vb = (vb || '').toLowerCase();
+      return state.previewSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    }
+    if (!isFinite(va)) va = state.previewSortDir === 'asc' ? Infinity : -Infinity;
+    if (!isFinite(vb)) vb = state.previewSortDir === 'asc' ? Infinity : -Infinity;
+    return state.previewSortDir === 'asc' ? va - vb : vb - va;
+  });
 }
 
 // Parse field list textarea
@@ -118,7 +178,7 @@ export function exportCSV(players, eventOrder) {
     'Floor', 'Ceiling', 'Volatility', 'CI', 'Momentum', 'Events'];
   const rows = players.map((p, i) => [
     i + 1,
-    p.name,
+    `"${p.name}"`,
     p.compositeScore.toFixed(3),
     p.avgPvi.toFixed(2),
     p.medianPvi.toFixed(2),
@@ -137,7 +197,7 @@ export function exportCSV(players, eventOrder) {
 
 // Export comparison data as CSV
 export function exportComparisonCSV(players) {
-  const headers = ['Stat', ...players.map(p => p.name)];
+  const headers = ['Stat', ...players.map(p => `"${p.name}"`)];
   const statRows = [
     ['Composite', ...players.map(p => p.compositeScore.toFixed(3))],
     ['Avg PVI', ...players.map(p => p.avgPvi.toFixed(2))],
@@ -153,6 +213,25 @@ export function exportComparisonCSV(players) {
 
   const csv = [headers.join(','), ...statRows.map(r => r.join(','))].join('\n');
   downloadCSV(csv, 'pvi_comparison.csv');
+}
+
+// Export preview as CSV
+export function exportPreviewCSV(previewList) {
+  const headers = ['Rank', 'Player', 'Has Data', 'Composite', 'Avg PVI', 'Median', 'Hit Rate %', 'CI', 'Momentum', 'Events'];
+  const rows = previewList.map((p, i) => [
+    i + 1,
+    `"${p.name}"`,
+    p._hasData ? 'Yes' : 'No',
+    p._hasData ? p.compositeScore.toFixed(3) : '',
+    p._hasData ? p.avgPvi.toFixed(2) : '',
+    p._hasData ? p.medianPvi.toFixed(2) : '',
+    p._hasData ? p.hitRate.toFixed(1) : '',
+    p._hasData ? (isFinite(p.consistencyIndex) ? p.consistencyIndex.toFixed(2) : 'Inf') : '',
+    p._hasData ? p.trendMomentum.toFixed(3) : '',
+    p._hasData ? p.events : ''
+  ]);
+  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  downloadCSV(csv, 'pvi_preview.csv');
 }
 
 function downloadCSV(csv, filename) {

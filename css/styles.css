@@ -87,6 +87,30 @@ body {
   border: 1px solid var(--border);
 }
 
+/* Tab navigation */
+.tab-btn {
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.04);
+}
+
+.tab-btn.tab-active {
+  color: var(--accent-green);
+  background: rgba(57,255,136,0.08);
+  border-color: rgba(57,255,136,0.2);
+}
+
 /* Cards */
 .summary-card {
   background: var(--bg-panel);
@@ -115,6 +139,25 @@ body {
 
 #main-table th {
   border-bottom: 1px solid var(--border);
+}
+
+/* Tag menu button: visible on row hover */
+.group .tag-menu-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.group:hover .tag-menu-btn {
+  opacity: 1;
+}
+
+/* Tag context menu */
+.tag-context-menu {
+  animation: fadeInMenu 0.12s ease-out;
+}
+
+@keyframes fadeInMenu {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Drop zone */
@@ -257,6 +300,20 @@ body {
   text-align: center;
 }
 
+/* Preview tab output table */
+#preview-output table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#preview-output th {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
 /* Light mode overrides */
 .light-mode {
   --bg-main: #f8fafc;
@@ -322,4 +379,31 @@ body {
 
 .light-mode .toggle-slider {
   background-color: rgba(0,0,0,0.15);
+}
+
+.light-mode .tab-btn {
+  color: var(--text-secondary);
+}
+
+.light-mode .tab-btn.tab-active {
+  color: var(--accent-green);
+  background: rgba(22,163,74,0.08);
+  border-color: rgba(22,163,74,0.2);
+}
+
+.light-mode .tag-context-menu {
+  background: #ffffff !important;
+  border-color: var(--border) !important;
+}
+
+.light-mode .tag-context-menu button {
+  color: var(--text-primary) !important;
+}
+
+.light-mode .tag-context-menu button:hover {
+  background: rgba(0,0,0,0.05) !important;
+}
+
+.light-mode #preview-output th {
+  background: var(--bg-panel);
 }

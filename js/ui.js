@@ -1,14 +1,16 @@
-// js/ui.js — DOM rendering for table, modal, comparison, summary cards
+// js/ui.js — DOM rendering for table, modal, comparison, summary cards, preview, heatmap, tags
 
-import { state, isInField } from './filters.js';
-import { renderPlayerLineChart, renderPlayerHistogram, renderComparisonChart } from './charts.js';
+import { state, isInField, getTag, setTag, loadTags, applyPreviewSort } from './filters.js';
+import { renderPlayerLineChart, renderPlayerHistogram, renderComparisonChart, getTierColor } from './charts.js';
 
 let allPlayersRef = [];
 let eventOrderRef = [];
+let tournamentStatsRef = [];
 
-export function setRefs(players, eventOrder) {
+export function setRefs(players, eventOrder, tournamentStats) {
   allPlayersRef = players;
   eventOrderRef = eventOrder;
+  tournamentStatsRef = tournamentStats || [];
 }
 
 // ---------- STATUS ----------
@@ -55,6 +57,97 @@ export function renderSummaryCards(players, eventOrder) {
   document.getElementById('card-consistent-name').textContent = mostConsistent.name;
   document.getElementById('card-consistent-val').textContent = isFinite(mostConsistent.consistencyIndex)
     ? mostConsistent.consistencyIndex.toFixed(2) : '—';
+}
+
+// ---------- TAG HELPERS ----------
+
+const TAG_COLORS = {
+  follow: { dot: '#39FF88', label: 'Follow' },
+  fade: { dot: '#ef4444', label: 'Fade' },
+  watch: { dot: '#facc15', label: 'Watch' }
+};
+
+function createTagDot(tag) {
+  if (!tag || !TAG_COLORS[tag]) return null;
+  const dot = document.createElement('span');
+  dot.className = 'inline-block w-2 h-2 rounded-full mr-1.5 flex-shrink-0';
+  dot.style.backgroundColor = TAG_COLORS[tag].dot;
+  dot.title = TAG_COLORS[tag].label;
+  return dot;
+}
+
+function showTagMenu(x, y, playerName, onDone) {
+  closeAllTagMenus();
+  const menu = document.createElement('div');
+  menu.className = 'tag-context-menu fixed z-[100] rounded-lg py-1 text-sm shadow-xl';
+  menu.style.cssText = `left:${x}px;top:${y}px;background:#1a1a22;border:1px solid rgba(255,255,255,0.1);min-width:140px;`;
+
+  const items = [
+    { icon: '✅', label: 'Follow', value: 'follow' },
+    { icon: '❌', label: 'Fade', value: 'fade' },
+    { icon: '👀', label: 'Watch', value: 'watch' },
+    { icon: '—', label: 'Clear Tag', value: null }
+  ];
+
+  for (const item of items) {
+    const btn = document.createElement('button');
+    btn.className = 'w-full text-left px-3 py-1.5 hover:bg-white/10 flex items-center gap-2 text-white/80 hover:text-white transition-colors';
+    btn.innerHTML = `<span>${item.icon}</span><span>${item.label}</span>`;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setTag(playerName, item.value);
+      closeAllTagMenus();
+      if (onDone) onDone();
+    });
+    menu.appendChild(btn);
+  }
+
+  document.body.appendChild(menu);
+
+  // Clamp to viewport
+  requestAnimationFrame(() => {
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+    if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+  });
+
+  const closer = (e) => {
+    if (!menu.contains(e.target)) { closeAllTagMenus(); document.removeEventListener('click', closer, true); }
+  };
+  setTimeout(() => document.addEventListener('click', closer, true), 0);
+}
+
+function closeAllTagMenus() {
+  document.querySelectorAll('.tag-context-menu').forEach(el => el.remove());
+}
+
+// ---------- HEATMAP HELPERS ----------
+
+function computePercentiles(filteredPlayers, key, invert) {
+  const vals = filteredPlayers.map(p => {
+    let v = p[key];
+    if (!isFinite(v)) v = invert ? 999 : -999;
+    return v;
+  }).sort((a, b) => a - b);
+
+  return (value) => {
+    let v = isFinite(value) ? value : (invert ? 999 : -999);
+    let rank = 0;
+    for (let i = 0; i < vals.length; i++) {
+      if (vals[i] <= v) rank = i;
+    }
+    return vals.length > 1 ? rank / (vals.length - 1) : 0.5;
+  };
+}
+
+function heatmapBg(percentile, isGood) {
+  // isGood: true = higher is better (green), false = lower is better (red for high)
+  const opacity = 0.05 + percentile * 0.65; // 0.05 to 0.7
+  if (isGood) {
+    return `rgba(57,255,136,${opacity.toFixed(3)})`;
+  } else {
+    return `rgba(239,68,68,${opacity.toFixed(3)})`;
+  }
 }
 
 // ---------- MAIN TABLE ----------
@@ -116,7 +209,7 @@ export function renderTableHeader(onSort) {
   thead.appendChild(tr);
 }
 
-export function renderTableBody(filteredPlayers, onPlayerClick, onCompareToggle) {
+export function renderTableBody(filteredPlayers, onPlayerClick, onCompareToggle, onTagChange) {
   const tbody = document.getElementById('main-tbody');
   tbody.innerHTML = '';
 
@@ -125,6 +218,22 @@ export function renderTableBody(filteredPlayers, onPlayerClick, onCompareToggle)
   const p75 = scores[Math.floor(scores.length * 0.75)] || 0;
 
   const fieldSet = new Set(state.fieldNames.map(n => n.toLowerCase()));
+
+  // Heatmap percentile functions
+  let hm = null;
+  if (state.heatmapOn && filteredPlayers.length > 1) {
+    hm = {
+      composite: computePercentiles(filteredPlayers, 'compositeScore'),
+      avgPvi: computePercentiles(filteredPlayers, 'avgPvi'),
+      medianPvi: computePercentiles(filteredPlayers, 'medianPvi'),
+      hitRate: computePercentiles(filteredPlayers, 'hitRate'),
+      volatility: computePercentiles(filteredPlayers, 'volatility'),
+      ci: computePercentiles(filteredPlayers, 'consistencyIndex'),
+      momentum: computePercentiles(filteredPlayers, 'trendMomentum'),
+      floor: computePercentiles(filteredPlayers, 'floor'),
+      ceiling: computePercentiles(filteredPlayers, 'ceiling')
+    };
+  }
 
   filteredPlayers.forEach((player, idx) => {
     const tr = document.createElement('tr');
@@ -135,24 +244,74 @@ export function renderTableBody(filteredPlayers, onPlayerClick, onCompareToggle)
     if (inField && !state.fieldMode) rowBg = 'rgba(245,158,11,0.08)';
 
     tr.style.backgroundColor = rowBg;
-    tr.className = 'hover:bg-white/5 transition-colors cursor-pointer border-b border-white/5';
+    tr.className = 'hover:bg-white/5 transition-colors cursor-pointer border-b border-white/5 relative';
 
     tr.addEventListener('click', (e) => {
-      if (e.target.closest('.compare-cb')) return;
+      if (e.target.closest('.compare-cb') || e.target.closest('.tag-menu-btn') || e.target.closest('.tag-context-menu')) return;
       onPlayerClick(player);
     });
 
-    // Rank
-    const tdRank = td(`${idx + 1}`, 'text-secondary font-mono text-sm');
-    tr.appendChild(tdRank);
+    // Right-click for tag menu
+    tr.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showTagMenu(e.clientX, e.clientY, player.name, () => { if (onTagChange) onTagChange(); });
+    });
 
-    // Name
-    const tdName = td(player.name, 'font-semibold text-white text-sm');
+    // Rank
+    tr.appendChild(td(`${idx + 1}`, 'text-secondary font-mono text-sm'));
+
+    // Name (with tag dot, regression icons, and menu button)
+    const tdName = document.createElement('td');
+    tdName.className = 'px-3 py-2.5 text-sm';
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'flex items-center gap-1';
+
+    const tag = getTag(player.name);
+    const tagDot = createTagDot(tag);
+    if (tagDot) nameWrap.appendChild(tagDot);
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'font-semibold text-white';
+    nameSpan.textContent = player.name;
+    nameWrap.appendChild(nameSpan);
+
+    if (player.regressionFlag) {
+      const warn = document.createElement('span');
+      warn.className = 'cursor-help ml-1';
+      warn.textContent = '⚠️';
+      warn.title = player.regressionDetail;
+      warn.style.fontSize = '12px';
+      nameWrap.appendChild(warn);
+    }
+    if (player.smallSampleFlag) {
+      const ss = document.createElement('span');
+      ss.className = 'cursor-help ml-0.5';
+      ss.textContent = '🔬';
+      ss.title = `Small sample — only ${player.events} events`;
+      ss.style.fontSize = '12px';
+      nameWrap.appendChild(ss);
+    }
+
+    // Tag menu button (visible on hover via CSS)
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'tag-menu-btn ml-auto text-secondary hover:text-white opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1';
+    menuBtn.textContent = '⋮';
+    menuBtn.style.fontSize = '14px';
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const rect = menuBtn.getBoundingClientRect();
+      showTagMenu(rect.left, rect.bottom + 4, player.name, () => { if (onTagChange) onTagChange(); });
+    });
+    nameWrap.appendChild(menuBtn);
+
+    tdName.appendChild(nameWrap);
     tr.appendChild(tdName);
+    tr.classList.add('group');
 
     // Composite Score badge
     const tdComp = document.createElement('td');
     tdComp.className = 'px-3 py-2.5';
+    if (hm) tdComp.style.backgroundColor = heatmapBg(hm.composite(player.compositeScore), true);
     const badge = document.createElement('span');
     badge.className = 'inline-block px-2 py-0.5 rounded text-xs font-bold font-mono';
     if (player.compositeScore >= p75) {
@@ -170,15 +329,18 @@ export function renderTableBody(filteredPlayers, onPlayerClick, onCompareToggle)
     const avgColor = player.avgPvi >= 1.0 ? '#39FF88' : '#94a3b8';
     const tdAvg = td(player.avgPvi.toFixed(2), 'font-mono text-sm');
     tdAvg.firstChild.style.color = avgColor;
+    if (hm) tdAvg.style.backgroundColor = heatmapBg(hm.avgPvi(player.avgPvi), true);
     tr.appendChild(tdAvg);
 
     // Median
     const tdMed = td(player.medianPvi.toFixed(2), 'font-mono text-sm hidden md:table-cell');
+    if (hm) tdMed.style.backgroundColor = heatmapBg(hm.medianPvi(player.medianPvi), true);
     tr.appendChild(tdMed);
 
     // Hit Rate
     const tdHit = document.createElement('td');
     tdHit.className = 'px-3 py-2.5';
+    if (hm) tdHit.style.backgroundColor = heatmapBg(hm.hitRate(player.hitRate), true);
     tdHit.innerHTML = `
       <div class="font-mono text-sm text-white">${player.hitRate.toFixed(0)}%</div>
       <div class="w-full h-1 rounded-full mt-1" style="background:rgba(255,255,255,0.06)">
@@ -187,11 +349,29 @@ export function renderTableBody(filteredPlayers, onPlayerClick, onCompareToggle)
     tr.appendChild(tdHit);
 
     // Floor / Ceiling
-    const tdFC = td(`${player.floor.toFixed(2)} → ${player.ceiling.toFixed(2)}`, 'font-mono text-sm text-secondary hidden md:table-cell');
+    const tdFC = document.createElement('td');
+    tdFC.className = 'px-3 py-2.5 font-mono text-sm hidden md:table-cell';
+    if (hm) {
+      // Split coloring: we'll color the whole cell by ceiling percentile (higher = better)
+      tdFC.style.backgroundColor = heatmapBg(hm.ceiling(player.ceiling), true);
+    }
+    const floorSpan = document.createElement('span');
+    floorSpan.textContent = player.floor.toFixed(2);
+    floorSpan.style.color = '#94a3b8';
+    const arrow = document.createElement('span');
+    arrow.textContent = ' → ';
+    arrow.style.color = '#94a3b8';
+    const ceilSpan = document.createElement('span');
+    ceilSpan.textContent = player.ceiling.toFixed(2);
+    ceilSpan.style.color = '#94a3b8';
+    tdFC.appendChild(floorSpan);
+    tdFC.appendChild(arrow);
+    tdFC.appendChild(ceilSpan);
     tr.appendChild(tdFC);
 
-    // Volatility
+    // Volatility (lower = better, so invert the color)
     const tdVol = td(player.volatility.toFixed(2), 'font-mono text-sm text-secondary');
+    if (hm) tdVol.style.backgroundColor = heatmapBg(hm.volatility(player.volatility), false);
     tr.appendChild(tdVol);
 
     // CI
@@ -199,6 +379,7 @@ export function renderTableBody(filteredPlayers, onPlayerClick, onCompareToggle)
     const ciColor = (isFinite(player.consistencyIndex) && player.consistencyIndex > 1.0) ? '#39DFFF' : '#94a3b8';
     const tdCI = td(ciVal, 'font-mono text-sm');
     tdCI.firstChild.style.color = ciColor;
+    if (hm) tdCI.style.backgroundColor = heatmapBg(hm.ci(player.consistencyIndex), true);
     tr.appendChild(tdCI);
 
     // Momentum
@@ -207,16 +388,16 @@ export function renderTableBody(filteredPlayers, onPlayerClick, onCompareToggle)
     const momColor = momVal >= 0 ? '#39FF88' : '#ef4444';
     const tdMom = td(momStr, 'font-mono text-sm');
     tdMom.firstChild.style.color = momColor;
+    if (hm) tdMom.style.backgroundColor = heatmapBg(hm.momentum(player.trendMomentum), true);
     tr.appendChild(tdMom);
 
     // Events
-    const tdEv = td(player.events, 'font-mono text-sm text-secondary');
-    tr.appendChild(tdEv);
+    tr.appendChild(td(player.events, 'font-mono text-sm text-secondary'));
 
     // Sparkline
     const tdSpark = document.createElement('td');
     tdSpark.className = 'px-3 py-2.5 hidden lg:table-cell';
-    tdSpark.appendChild(createSparkline(player, eventOrderRef));
+    tdSpark.appendChild(createSparkline(player));
     tr.appendChild(tdSpark);
 
     // Compare checkbox
@@ -232,6 +413,12 @@ export function renderTableBody(filteredPlayers, onPlayerClick, onCompareToggle)
 
     tbody.appendChild(tr);
   });
+
+  // Heatmap legend
+  const legendEl = document.getElementById('heatmap-legend');
+  if (legendEl) {
+    legendEl.classList.toggle('hidden', !state.heatmapOn);
+  }
 }
 
 function td(content, classes) {
@@ -243,7 +430,7 @@ function td(content, classes) {
   return el;
 }
 
-function createSparkline(player, eventOrder) {
+function createSparkline(player) {
   const values = [];
   const labels = [];
   for (const d of player.eventsDetail) {
@@ -283,13 +470,11 @@ function createSparkline(player, eventOrder) {
   polyline.setAttribute('stroke-linejoin', 'round');
   svg.appendChild(polyline);
 
-  // Tooltip group
   const tooltip = document.createElement('div');
   tooltip.className = 'fixed z-50 pointer-events-none px-2 py-1 rounded text-xs font-mono hidden';
   tooltip.style.cssText = 'background:#0E0E12;color:#ffffff;border:1px solid rgba(255,255,255,0.1);';
   document.body.appendChild(tooltip);
 
-  // Hover dots
   for (const pt of points) {
     const circle = document.createElementNS(ns, 'circle');
     circle.setAttribute('cx', pt.x);
@@ -342,6 +527,41 @@ export function openPlayerModal(player) {
   const pctRank = Math.round(100 - player.percentileRank);
   document.getElementById('modal-percentile').textContent = `Top ${Math.max(1, pctRank)}%`;
   document.getElementById('modal-percentile').style.color = pctRank <= 25 ? '#39FF88' : '#39DFFF';
+
+  // Tag badge in modal
+  const modalTagArea = document.getElementById('modal-tag-area');
+  modalTagArea.innerHTML = '';
+  const currentTag = getTag(player.name);
+  const tagSelect = document.createElement('select');
+  tagSelect.className = 'text-xs rounded px-2 py-1 cursor-pointer';
+  tagSelect.style.cssText = 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:#94a3b8;outline:none;';
+  const tagOpts = [
+    { value: '', label: 'No Tag' },
+    { value: 'follow', label: '✅ Follow' },
+    { value: 'fade', label: '❌ Fade' },
+    { value: 'watch', label: '👀 Watch' }
+  ];
+  for (const opt of tagOpts) {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    if ((currentTag || '') === opt.value) o.selected = true;
+    tagSelect.appendChild(o);
+  }
+  tagSelect.addEventListener('change', () => {
+    setTag(player.name, tagSelect.value || null);
+  });
+  modalTagArea.appendChild(tagSelect);
+
+  // Regression warning banner
+  const bannerEl = document.getElementById('modal-regression-banner');
+  if (player.regressionFlag) {
+    bannerEl.classList.remove('hidden');
+    bannerEl.innerHTML = `⚠️ <strong>Outlier Alert:</strong> ${player.regressionDetail}. Average may be misleading — check median.`;
+  } else {
+    bannerEl.classList.add('hidden');
+    bannerEl.innerHTML = '';
+  }
 
   // Stat cards
   document.getElementById('modal-avg').textContent = player.avgPvi.toFixed(2);
@@ -398,7 +618,6 @@ export function openPlayerModal(player) {
     etbody.appendChild(tr);
   }
 
-  // Show
   modal.classList.remove('translate-x-full');
   modal.classList.add('translate-x-0');
   overlay.classList.remove('hidden');
@@ -453,7 +672,6 @@ export function renderComparisonPanel(players) {
     tbody.appendChild(tr);
   }
 
-  // Comparison chart
   setTimeout(() => {
     renderComparisonChart('comparison-chart', players, eventOrderRef);
   }, 50);
@@ -463,31 +681,21 @@ export function renderComparisonPanel(players) {
 
 export function showSkeleton(show) {
   const el = document.getElementById('skeleton-loader');
-  if (show) {
-    el.classList.remove('hidden');
-  } else {
-    el.classList.add('hidden');
-  }
+  if (show) el.classList.remove('hidden');
+  else el.classList.add('hidden');
 }
 
 export function setLoadingStatus(text) {
   const el = document.getElementById('loading-status');
-  if (text) {
-    el.textContent = text;
-    el.classList.remove('hidden');
-  } else {
-    el.classList.add('hidden');
-  }
+  if (text) { el.textContent = text; el.classList.remove('hidden'); }
+  else el.classList.add('hidden');
 }
 
 // ---------- FIELD TOOLS ----------
 
 export function renderFieldStats(fieldNames, allPlayers) {
   const statsEl = document.getElementById('field-stats');
-  if (fieldNames.length === 0) {
-    statsEl.innerHTML = '';
-    return;
-  }
+  if (fieldNames.length === 0) { statsEl.innerHTML = ''; return; }
 
   const playerNameSet = new Set(allPlayers.map(p => p.name.toLowerCase()));
   const matched = fieldNames.filter(n => playerNameSet.has(n.toLowerCase()));
@@ -504,4 +712,211 @@ export function renderFieldStats(fieldNames, allPlayers) {
   }
 
   statsEl.innerHTML = html;
+}
+
+// ---------- PREVIEW TAB ----------
+
+export function renderPreviewTable(fieldNames, allPlayers, onPlayerClick, onSortChange) {
+  const outputEl = document.getElementById('preview-output');
+  const summaryEl = document.getElementById('preview-summary');
+
+  if (!fieldNames || fieldNames.length === 0) {
+    outputEl.innerHTML = '<p class="text-secondary text-sm py-8 text-center">Paste a field list and click "Load Field" to see rankings.</p>';
+    summaryEl.innerHTML = '';
+    return;
+  }
+
+  const playerMap = new Map(allPlayers.map(p => [p.name.toLowerCase(), p]));
+  const scores = allPlayers.map(p => p.compositeScore).sort((a, b) => a - b);
+  const p25 = scores[Math.floor(scores.length * 0.25)] || 0;
+  const p75 = scores[Math.floor(scores.length * 0.75)] || 0;
+
+  // Build preview list
+  let previewList = fieldNames.map(name => {
+    const p = playerMap.get(name.toLowerCase());
+    if (p) return { ...p, _hasData: true, _originalName: name };
+    return {
+      name, _hasData: false, _originalName: name,
+      compositeScore: -1, avgPvi: 0, medianPvi: 0, hitRate: 0,
+      consistencyIndex: 0, trendMomentum: 0, events: 0, volatility: 0,
+      floor: 0, ceiling: 0, regressionFlag: false, smallSampleFlag: false
+    };
+  });
+
+  previewList = applyPreviewSort(previewList);
+
+  // Summary
+  const withData = previewList.filter(p => p._hasData);
+  const missing = previewList.filter(p => !p._hasData);
+  const avgComp = withData.length > 0 ? (withData.reduce((s, p) => s + p.compositeScore, 0) / withData.length) : 0;
+  const avgPvi = withData.length > 0 ? (withData.reduce((s, p) => s + p.avgPvi, 0) / withData.length) : 0;
+
+  let sumHtml = `
+    <div class="flex flex-wrap gap-4 mb-3">
+      <div class="text-sm text-secondary"><span class="text-white font-semibold">${withData.length}</span> of ${fieldNames.length} players have PVI data (${((withData.length / fieldNames.length) * 100).toFixed(0)}%)</div>
+      <div class="text-sm text-secondary">Field Avg Composite: <span class="text-white font-mono font-semibold">${avgComp.toFixed(3)}</span></div>
+      <div class="text-sm text-secondary">Field Avg PVI: <span class="text-white font-mono font-semibold">${avgPvi.toFixed(2)}</span></div>
+    </div>`;
+
+  if (missing.length > 0) {
+    sumHtml += `<details class="mb-2"><summary class="text-xs text-red-400 cursor-pointer hover:text-red-300">Missing from dataset (${missing.length})</summary><div class="flex flex-wrap gap-1 mt-1">`;
+    for (const m of missing) {
+      sumHtml += `<span class="text-xs px-2 py-0.5 rounded" style="background:rgba(239,68,68,0.1);color:#ef4444;">${m.name}</span>`;
+    }
+    sumHtml += '</div></details>';
+  }
+  summaryEl.innerHTML = sumHtml;
+
+  // Preview table header
+  const PREVIEW_COLS = [
+    { key: 'rank', label: '#', sortable: false },
+    { key: 'name', label: 'Player' },
+    { key: 'compositeScore', label: 'Composite' },
+    { key: 'avgPvi', label: 'Avg PVI' },
+    { key: 'medianPvi', label: 'Median' },
+    { key: 'hitRate', label: 'Hit Rate' },
+    { key: 'consistencyIndex', label: 'CI' },
+    { key: 'trendMomentum', label: 'Momentum' },
+    { key: 'events', label: 'Events' },
+    { key: 'flags', label: '', sortable: false },
+    { key: 'tag', label: 'Tag', sortable: false }
+  ];
+
+  let tableHtml = '<table class="w-full text-left"><thead><tr>';
+  for (const col of PREVIEW_COLS) {
+    const isSorted = col.sortable !== false && state.previewSortKey === col.key;
+    const arrow = isSorted ? (state.previewSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    const cursor = col.sortable !== false ? 'cursor-pointer' : '';
+    tableHtml += `<th class="px-3 py-2.5 text-xs font-medium uppercase tracking-wider select-none whitespace-nowrap ${cursor}" style="color:#94a3b8" data-sort-key="${col.key}" data-sortable="${col.sortable !== false}">${col.label}${arrow}</th>`;
+  }
+  tableHtml += '</tr></thead><tbody>';
+
+  previewList.forEach((p, idx) => {
+    const tag = getTag(p.name);
+    const tagDotHtml = tag && TAG_COLORS[tag]
+      ? `<span class="inline-block w-2 h-2 rounded-full mr-1" style="background:${TAG_COLORS[tag].dot}" title="${TAG_COLORS[tag].label}"></span>`
+      : '';
+
+    const rowClass = p._hasData ? 'cursor-pointer hover:bg-white/5' : 'opacity-60';
+    const bgClass = idx % 2 === 1 ? 'background:rgba(255,255,255,0.015)' : '';
+
+    tableHtml += `<tr class="${rowClass} border-b border-white/5 transition-colors" style="${bgClass}" data-player-name="${p.name}" data-has-data="${p._hasData}">`;
+
+    // Rank
+    tableHtml += `<td class="px-3 py-2.5 text-secondary font-mono text-sm">${idx + 1}</td>`;
+
+    // Name
+    const nameColor = p._hasData ? 'text-white' : 'text-secondary';
+    const noBadge = !p._hasData ? ' <span class="text-xs px-1.5 py-0.5 rounded ml-1" style="background:rgba(255,255,255,0.06);color:#94a3b8;">No Data</span>' : '';
+    tableHtml += `<td class="px-3 py-2.5 text-sm font-semibold ${nameColor}">${tagDotHtml}${escHtml(p.name)}${noBadge}</td>`;
+
+    if (p._hasData) {
+      // Composite badge
+      let badgeStyle;
+      if (p.compositeScore >= p75) badgeStyle = 'background:rgba(57,255,136,0.15);color:#39FF88;';
+      else if (p.compositeScore >= p25) badgeStyle = 'background:rgba(57,223,255,0.15);color:#39DFFF;';
+      else badgeStyle = 'background:rgba(239,68,68,0.15);color:#ef4444;';
+      tableHtml += `<td class="px-3 py-2.5"><span class="inline-block px-2 py-0.5 rounded text-xs font-bold font-mono" style="${badgeStyle}">${p.compositeScore.toFixed(3)}</span></td>`;
+
+      // Avg PVI
+      const avgColor = p.avgPvi >= 1.0 ? '#39FF88' : '#94a3b8';
+      tableHtml += `<td class="px-3 py-2.5 font-mono text-sm" style="color:${avgColor}">${p.avgPvi.toFixed(2)}</td>`;
+
+      // Median
+      tableHtml += `<td class="px-3 py-2.5 font-mono text-sm text-secondary">${p.medianPvi.toFixed(2)}</td>`;
+
+      // Hit Rate
+      tableHtml += `<td class="px-3 py-2.5 font-mono text-sm text-white">${p.hitRate.toFixed(0)}%</td>`;
+
+      // CI
+      const ciColor = (isFinite(p.consistencyIndex) && p.consistencyIndex > 1.0) ? '#39DFFF' : '#94a3b8';
+      const ciVal = isFinite(p.consistencyIndex) ? p.consistencyIndex.toFixed(2) : '∞';
+      tableHtml += `<td class="px-3 py-2.5 font-mono text-sm" style="color:${ciColor}">${ciVal}</td>`;
+
+      // Momentum
+      const momColor = p.trendMomentum >= 0 ? '#39FF88' : '#ef4444';
+      const momStr = (p.trendMomentum >= 0 ? '+' : '') + p.trendMomentum.toFixed(3);
+      tableHtml += `<td class="px-3 py-2.5 font-mono text-sm" style="color:${momColor}">${momStr}</td>`;
+
+      // Events
+      tableHtml += `<td class="px-3 py-2.5 font-mono text-sm text-secondary">${p.events}</td>`;
+
+      // Flags
+      let flags = '';
+      if (p.regressionFlag) flags += `<span class="cursor-help" title="${escHtml(p.regressionDetail)}" style="font-size:12px">⚠️</span>`;
+      if (p.smallSampleFlag) flags += `<span class="cursor-help" title="Small sample — only ${p.events} events" style="font-size:12px">🔬</span>`;
+      tableHtml += `<td class="px-3 py-2.5 text-sm">${flags}</td>`;
+    } else {
+      tableHtml += '<td class="px-3 py-2.5"></td>'.repeat(8);
+    }
+
+    // Tag
+    const tagLabel = tag && TAG_COLORS[tag] ? TAG_COLORS[tag].label : '';
+    tableHtml += `<td class="px-3 py-2.5 text-xs text-secondary">${tagLabel}</td>`;
+
+    tableHtml += '</tr>';
+  });
+
+  tableHtml += '</tbody></table>';
+  outputEl.innerHTML = tableHtml;
+
+  // Bind sort clicks on header
+  outputEl.querySelectorAll('th[data-sortable="true"]').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sortKey;
+      if (state.previewSortKey === key) {
+        state.previewSortDir = state.previewSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.previewSortKey = key;
+        state.previewSortDir = 'desc';
+      }
+      if (onSortChange) onSortChange();
+    });
+  });
+
+  // Bind row clicks to open modal
+  outputEl.querySelectorAll('tr[data-has-data="true"]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const name = tr.dataset.playerName;
+      const p = playerMap.get(name.toLowerCase());
+      if (p && onPlayerClick) onPlayerClick(p);
+    });
+  });
+}
+
+function escHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ---------- TOURNAMENT INTELLIGENCE TABLE ----------
+
+export function renderTournamentIntelTable(tournamentStats) {
+  const tbody = document.getElementById('tourney-intel-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const sorted = [...tournamentStats].sort((a, b) => b.avgPvi - a.avgPvi);
+
+  sorted.forEach((s, i) => {
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-white/5';
+    const bgColor = i % 2 === 1 ? 'rgba(255,255,255,0.015)' : 'transparent';
+    tr.style.backgroundColor = bgColor;
+
+    let badge = '';
+    if (i === 0) badge = ' <span class="text-xs ml-1">🏆 Toughest Field</span>';
+    if (i === sorted.length - 1 && sorted.length > 1) badge = ' <span class="text-xs ml-1 text-secondary">Softest Field</span>';
+
+    tr.innerHTML = `
+      <td class="px-3 py-2 font-mono text-sm text-secondary">${s.rank}</td>
+      <td class="px-3 py-2 text-sm text-white font-semibold">${escHtml(s.eventName)}${badge}</td>
+      <td class="px-3 py-2 font-mono text-sm" style="color:#39FF88">${s.avgPvi.toFixed(3)}</td>
+      <td class="px-3 py-2 font-mono text-sm text-secondary">${s.medianPvi.toFixed(3)}</td>
+      <td class="px-3 py-2 font-mono text-sm text-secondary">${s.playerCount}</td>
+      <td class="px-3 py-2 font-mono text-sm text-secondary">${s.stdDev.toFixed(3)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
 }

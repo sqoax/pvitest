@@ -5,14 +5,12 @@ export function processSheet(input) {
   let rows;
 
   if (Array.isArray(input)) {
-    // PapaParse 2D array — use directly
     rows = input;
   } else {
-    // SheetJS sheet object — convert to 2D array
     rows = XLSX.utils.sheet_to_json(input, { header: 1, defval: '' });
   }
 
-  if (!rows || rows.length === 0) return { players: [], eventOrder: [] };
+  if (!rows || rows.length === 0) return { players: [], eventOrder: [], tournamentStats: [] };
 
   const headerRow = rows[0];
   const totalCols = headerRow.length;
@@ -26,10 +24,10 @@ export function processSheet(input) {
     }
   }
 
-  // Per-event raw values for z-score calculation
+  // Per-event raw values for z-score and tournament strength calculation
   const eventRawValues = eventOrder.map(() => []);
 
-  // Build player map: name -> { series: [pvi|null per event], eventsDetail: [] }
+  // Build player map
   const playerMap = new Map();
 
   for (let ei = 0; ei < eventOrder.length; ei++) {
@@ -60,7 +58,7 @@ export function processSheet(input) {
     }
   }
 
-  // Compute per-event mean & std for z-scores
+  // Per-event mean & std for z-scores
   const eventStats = eventRawValues.map(vals => {
     if (vals.length === 0) return { mean: 0, std: 1 };
     const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
@@ -81,18 +79,15 @@ export function processSheet(input) {
     const totalPvi = pviValues.reduce((a, b) => a + b, 0);
     const avgPvi = totalPvi / events;
 
-    // Median
     const sorted = [...pviValues].sort((a, b) => a - b);
     const medianPvi = events % 2 === 1
       ? sorted[Math.floor(events / 2)]
       : (sorted[events / 2 - 1] + sorted[events / 2]) / 2;
 
-    // Sample standard deviation
     const volatility = events > 1
       ? Math.sqrt(pviValues.reduce((s, v) => s + (v - avgPvi) ** 2, 0) / (events - 1))
       : 0;
 
-    // Consistency Index
     let consistencyIndex;
     if (volatility === 0) {
       consistencyIndex = events > 1 ? Infinity : 0;
@@ -100,7 +95,6 @@ export function processSheet(input) {
       consistencyIndex = avgPvi / volatility;
     }
 
-    // Trend Momentum — uses chronological event order
     const chronoValues = [];
     for (let i = 0; i < raw.series.length; i++) {
       if (raw.series[i] !== null) chronoValues.push(raw.series[i]);
@@ -115,21 +109,18 @@ export function processSheet(input) {
       trendMomentum = avgRecent - avgPrevious;
     }
 
-    // Hit Rate
     const countGte1 = pviValues.filter(v => v >= 1.0).length;
     const hitRate = (countGte1 / events) * 100;
 
     const floor = Math.min(...pviValues);
     const ceiling = Math.max(...pviValues);
 
-    // Z-scores for event details
     for (const detail of raw.eventsDetail) {
       const es = eventStats[detail.eventIndex];
       detail.zScore = es.std > 0 ? (detail.pvi - es.mean) / es.std : 0;
       delete detail.eventIndex;
     }
 
-    // Sort events by chronological order
     raw.eventsDetail.sort((a, b) => {
       return eventOrder.indexOf(a.eventName) - eventOrder.indexOf(b.eventName);
     });
@@ -150,17 +141,18 @@ export function processSheet(input) {
       series: raw.series,
       eventsDetail: raw.eventsDetail,
       compositeScore: 0,
-      percentileRank: 0
+      percentileRank: 0,
+      regressionFlag: false,
+      regressionDetail: '',
+      smallSampleFlag: false
     });
   }
 
   // Compute composite scores with normalization
   if (players.length > 0) {
-    // Gather raw values for normalization
     const avgPvis = players.map(p => p.avgPvi);
     const cis = players.map(p => Math.min(isFinite(p.consistencyIndex) ? p.consistencyIndex : 5, 5));
     const momentums = players.map(p => p.trendMomentum);
-    const hitRates = players.map(p => p.hitRate);
 
     const normalize = (val, arr) => {
       const min = Math.min(...arr);
@@ -183,7 +175,56 @@ export function processSheet(input) {
     for (let i = 0; i < sortedByComposite.length; i++) {
       sortedByComposite[i].percentileRank = (i / (players.length - 1)) * 100 || 0;
     }
+
+    // --- Regression flags (calculated AFTER composite scores) ---
+    const avgPviSorted = [...avgPvis].sort((a, b) => a - b);
+    const avgPviP75 = avgPviSorted[Math.floor(avgPviSorted.length * 0.75)] || 0;
+
+    for (const p of players) {
+      const pviValues = p.eventsDetail.map(d => d.pvi);
+      const maxPvi = Math.max(...pviValues);
+
+      if (p.totalPvi > 0) {
+        const maxPct = (maxPvi / p.totalPvi) * 100;
+        if (maxPct >= 40 && p.events >= 3) {
+          p.regressionFlag = true;
+          p.regressionDetail = `1 event = ${maxPct.toFixed(0)}% of total PVI`;
+        }
+      }
+
+      if (p.events <= 3 && p.avgPvi >= avgPviP75) {
+        p.smallSampleFlag = true;
+      }
+    }
   }
 
-  return { players, eventOrder };
+  // --- Tournament Strength Ratings ---
+  const tournamentStats = eventOrder.map((eventName, ei) => {
+    const vals = eventRawValues[ei];
+    if (vals.length === 0) {
+      return { eventName, avgPvi: 0, medianPvi: 0, playerCount: 0, stdDev: 0, rank: 0 };
+    }
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const sorted = [...vals].sort((a, b) => a - b);
+    const median = vals.length % 2 === 1
+      ? sorted[Math.floor(vals.length / 2)]
+      : (sorted[vals.length / 2 - 1] + sorted[vals.length / 2]) / 2;
+    const variance = vals.length > 1
+      ? vals.reduce((s, v) => s + (v - mean) ** 2, 0) / (vals.length - 1)
+      : 0;
+    return {
+      eventName,
+      avgPvi: mean,
+      medianPvi: median,
+      playerCount: vals.length,
+      stdDev: Math.sqrt(variance),
+      rank: 0
+    };
+  });
+
+  // Rank by avgPvi descending (rank 1 = strongest/highest)
+  const rankedStats = [...tournamentStats].sort((a, b) => b.avgPvi - a.avgPvi);
+  rankedStats.forEach((s, i) => { s.rank = i + 1; });
+
+  return { players, eventOrder, tournamentStats };
 }
